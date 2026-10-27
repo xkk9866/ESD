@@ -1,30 +1,49 @@
-# ESD
+# Evidence Set Decoding (ESD)
 
-Joint evidence selection and stopping for multi-hop question answering.
+ESD selects an evidence set one sentence at a time. A shared cross-encoder scores the remaining sentences and a stopping action using the question and the evidence already selected. The same policy therefore decides both what to retain and when the context is complete.
 
-This repository publishes the project's implementation, training, retrieval, evaluation and experiment-launch code. Manuscripts, submission documents, publication figures and their typesetting scripts are excluded.
+## Code layout
 
-## Code map
+| Path | Purpose |
+| --- | --- |
+| `src/esd.py` | Set-conditioned policy and training |
+| `src/esd_run.py` | Greedy evidence-set decoding |
+| `src/data_prep.py`, `src/units.py` | Dataset conversion and sentence units |
+| `src/ftce_train.py` | Initial cross-encoder training |
+| `src/reader.py`, `src/evaluate.py` | Reader inference and answer evaluation |
+| `src/baselines.py`, `src/legacy/` | Comparison methods |
+| `srv_src/`, `scripts/` | Additional experiment implementations and launch scripts |
 
-- `src/esd.py`: policy and training.
-- `src/esd_run.py`: evidence-set decoding.
-- `src/data_prep.py`, `make_pools.py`, `reader.py`, `evaluate.py`: preparation and evaluation.
-- `srv_src/` and `scripts/`: server snapshot and experiment launch scripts.
+Start with `src/` for the ESD training and decoding workflow.
 
-## Environment and data
+## Prepare the environment and data
 
-The code uses Python and a GPU-oriented PyTorch/Transformers stack. Inspect the imports and command-line options of the selected entry point before installing dependencies. Historical snapshots and comparison implementations are retained; they are not all required for one experiment.
+The core dependencies are CUDA-enabled PyTorch, Transformers, NumPy and pandas. Reader inference uses vLLM. Install the dependencies for the stages you intend to run in the same Python environment.
 
-Download benchmark datasets and pretrained models from their original providers. The source release does not contain benchmark corpora, generated trajectories, trained weights or retrieval indexes. Some launch scripts use the original experiment directory layout, GPU assignments and model-cache paths; set these for your own machine before running them. No claim is made that a new machine reproduces the experiments without preparing these inputs.
+Run commands from the repository root. Place the source datasets under `data/raw/`, following the filenames and formats in `src/data_prep.py`. That script prepares HotpotQA, 2WikiMultihopQA and MuSiQue training examples, as well as evaluation splits that include Natural Questions:
 
-## Remote execution
+```bash
+python src/data_prep.py
+```
 
-Remote helpers that previously embedded login details now read `SSH_HOST`, `SSH_PORT` (default 22), `SSH_USER` and optional `SSH_PASSWORD` from the environment. Set these locally, or use your SSH agent/key configuration. Do not commit credentials or local server information files.
+Processed examples are stored in `data/proc/`. Each example contains a question and passages split into sentences, with evidence labels used during training.
 
-## Included snapshots and third-party code
+## Train and decode
 
-Source subdirectories retain their original relative paths. Where `repos/` is present, the included upstream source retains its existing LICENSE and NOTICE files. Those licenses apply to their respective components. No new license grant for the project's own code has been added in this release.
+Download the initial reranker to `models/bge-reranker-v2-m3`, or change `--backbone` to your model directory. The following commands train the initial cross-encoder, fit ESD and decode the test sets:
 
-## Release checks
+```bash
+python src/ftce_train.py --backbone models/bge-reranker-v2-m3 --out ckpt/ftce
+python src/esd.py --backbone ckpt/ftce --train data/proc/train.jsonl --out ckpt/esd --seed 0
+python src/esd_run.py --ckpt ckpt/esd --name esd --datasets hotpotqa,musique,2wiki
+```
 
-Python source files were parsed for syntax, publication files were excluded, and the release was checked for embedded SSH credentials and common token/private-key patterns. Training and large-scale retrieval experiments were not rerun as part of packaging.
+Decoding writes the decision sequences to `results/chains/<dataset>/` and the resulting reader contexts to `results/compressed/<dataset>/`. It also writes an equal-count marginal selection for comparing set-conditioned decoding with independent sentence scores.
+
+Use `src/reader.py` to answer from the compressed contexts and `src/evaluate.py` to compute answer metrics. Reader model paths are supplied through the reader's command-line arguments. `--help` lists the options for each of the commands above after its Python dependencies are installed.
+
+The repository includes source code and experiment scripts. Download datasets and pretrained models separately; trained checkpoints and generated results are not bundled.
+
+## License
+
+A license for the project-specific code has not yet been specified.
